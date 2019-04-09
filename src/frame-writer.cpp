@@ -269,6 +269,8 @@ void FrameWriter::add_frame(const uint8_t* pixels, int msec, bool y_invert)
     }
 
     AVFrame **output_frame;
+    AVBufferRef *saved_buf0 = NULL;
+
     if (hw_device_context)
     {
         encoder_frame->data[0] = (uint8_t*)formatted_pixels;
@@ -286,11 +288,16 @@ void FrameWriter::add_frame(const uint8_t* pixels, int msec, bool y_invert)
         output_frame = &encoder_frame;
         encoder_frame->data[0] = (uint8_t*)formatted_pixels;
         encoder_frame->linesize[0] = stride[0];
+        /* Force ffmpeg to create a copy of the frame, if the codec needs it */
+        saved_buf0 = encoder_frame->buf[0];
+        encoder_frame->buf[0] = NULL;
     } else
     {
         sws_scale(swsCtx, &formatted_pixels, stride, 0, params.height,
             encoder_frame->data, encoder_frame->linesize);
-
+        /* Force ffmpeg to create a copy of the frame, if the codec needs it */
+        saved_buf0 = encoder_frame->buf[0];
+        encoder_frame->buf[0] = NULL;
         output_frame = &encoder_frame;
     }
 
@@ -302,6 +309,11 @@ void FrameWriter::add_frame(const uint8_t* pixels, int msec, bool y_invert)
 
     int got_output;
     avcodec_encode_video2(codecCtx, &pkt, *output_frame, &got_output);
+
+    /* Restore frame buffer, so that it can be properly freed in the end */
+    if (saved_buf0)
+        encoder_frame->buf[0] = saved_buf0;
+
     if (got_output)
       finish_frame();
 }
